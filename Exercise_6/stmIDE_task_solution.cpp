@@ -18,10 +18,15 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
+#include "arm_math.h"
+#include "stm32f4xx_hal_tim.h"
+#include "stm32f4xx_hal_tim_ex.h"
+#include "stm32f4xx_hal.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 #include "arm_math.h"
+#include "arm_const_structs.h"
 // #include "hal_tim_pwm_start.h"
 /* USER CODE END Includes */
 
@@ -34,6 +39,7 @@
 /* USER CODE BEGIN PD */
 #define WINDOW_SIZE 1024  // MUST be power of 2
 #define ADC_BUFFER_SIZE WINDOW_SIZE * 2 // Twice the "WINDOW_SIZE"
+TIM_HandleTypeDef htim2;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -86,7 +92,14 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+	/* Arrays for representing RFFT Data at different stages */
+	float32_t RFFT_Input[WINDOW_SIZE];  // Real-valued time-domain samples stored as array floating-point values
+	float32_t RFFT_Output[WINDOW_SIZE]; // Complex-valued RFFT output with length WINDOW_SIZE/2 (two floats per complex value)
+	float32_t RFFT_Out_Mag[WINDOW_SIZE/2 + 1]; // Magnitude calculations for frequency component 0 to WINDOW_SIZE/2
 
+	/* Set up an RFFT instance to handle RFFT calculations for WINDOW_SIZE samples represented with 32-bit floats. */
+	arm_rfft_fast_instance_f32 varInstRfftF32;    /* ARM RFFT module struct declaration */
+	arm_rfft_fast_init_f32(&varInstRfftF32, WINDOW_SIZE); /* Initialization with respect to window size */
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -122,6 +135,26 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    if (buffer_full == 1){
+        buffer_full = 0; // Reset 'buffer_full' flag
+
+        // Copy values from ADC_Buffer to RFFT_Input
+        for (int i = 0; i<WINDOW_SIZE; i++){
+            RFFT_Input[i] = (float32_t)ADC_buffer[read_buffer_start + i];
+        }
+
+        /* Calculate the real-valued FFT */
+        arm_rfft_fast_f32(&varInstRfftF32, /* RFFT Instance to use during calculations */
+                          RFFT_Input,   /* Array of input values. Will be changed by the RFFT algorithm */
+                          RFFT_Output,  /* Packed complex output for the WINDOW_SIZE/2 + 1 compoinents in the one-sided frequency spectrum */
+                          0);           /* Do not calculate the Inverse RFFT */
+
+        /* Extract magnitude information |X[m]| */
+        RFFT_Out_Mag[WINDOW_SIZE] = fabs(RFFT_Output[1]); /* Unpack nyquist component from RFFT Output. */
+        RFFT_Output[1] = 0.0; /* Imaginary part of X[0] is 0 */
+        arm_cmplx_mag_f32(RFFT_Output, RFFT_Out_Mag, WINDOW_SIZE/2); /* RFFT_Output[i], 2 <= i < WINDOW_SIZE contain complex data for samples X[m], 1 <= m < N/2 */
+
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
