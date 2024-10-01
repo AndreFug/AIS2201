@@ -18,15 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "arm_math.h"
-#include "stm32f4xx_hal_tim.h"
-#include "stm32f4xx_hal_tim_ex.h"
-#include "stm32f4xx_hal.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <math.h>
 #include "arm_math.h"
 #include "arm_const_structs.h"
+#include <stdio.h>
 // #include "hal_tim_pwm_start.h"
 /* USER CODE END Includes */
 
@@ -51,10 +49,12 @@ TIM_HandleTypeDef htim2;
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
+TIM_HandleTypeDef htim2;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-uint32_t ADC_buffer[ADC_BUFFER_SIZE]; // Buffer to fill with values from ADC.
+uint16_t ADC_buffer[ADC_BUFFER_SIZE]; // Buffer to fill with values from ADC.
 __IO uint8_t buffer_full = 0;       // Flag used by interrupt handlers to signal when buffer is ready.
 uint32_t read_buffer_start = 0;     // Index of first sample in RFFT window
 /* USER CODE END PV */
@@ -65,6 +65,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
@@ -123,6 +124,7 @@ int main(void)
   MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(100); /* Add a short delay between ADC config and ADC startup.*/
   HAL_TIM_PWM_Start(&htim2, ADC_CHANNEL_1);
@@ -133,32 +135,44 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  char uart_message[50];
   while (1)
-  {
-    if (buffer_full == 1){
-        buffer_full = 0; // Reset 'buffer_full' flag
+    {
+  	  if (buffer_full == 1)
+  	      {
+  	          buffer_full = 0;
 
-        // Copy values from ADC_Buffer to RFFT_Input
-        for (int i = 0; i<WINDOW_SIZE; i++){
-            RFFT_Input[i] = (float32_t)ADC_buffer[read_buffer_start + i];
-        }
 
-        /* Calculate the real-valued FFT */
-        arm_rfft_fast_f32(&varInstRfftF32, /* RFFT Instance to use during calculations */
-                          RFFT_Input,   /* Array of input values. Will be changed by the RFFT algorithm */
-                          RFFT_Output,  /* Packed complex output for the WINDOW_SIZE/2 + 1 compoinents in the one-sided frequency spectrum */
-                          0);           /* Do not calculate the Inverse RFFT */
+  	          for (int i = 0; i < 10; i++)
+  	                    {
+  	                        sprintf(uart_message, "ADC Value %d: %lu\r\n", i, ADC_buffer[read_buffer_start + i]);
+  	                        HAL_UART_Transmit(&huart2, (uint8_t *)uart_message, strlen(uart_message), 100);
+  	                    }
 
-        /* Extract magnitude information |X[m]| */
-        RFFT_Out_Mag[WINDOW_SIZE] = fabs(RFFT_Output[1]); /* Unpack nyquist component from RFFT Output. */
-        RFFT_Output[1] = 0.0; /* Imaginary part of X[0] is 0 */
-        arm_cmplx_mag_f32(RFFT_Output, RFFT_Out_Mag, WINDOW_SIZE/2); /* RFFT_Output[i], 2 <= i < WINDOW_SIZE contain complex data for samples X[m], 1 <= m < N/2 */
+  	          for (int i = 0; i < WINDOW_SIZE; i++)
+  	          {
+  	              RFFT_Input[i] = (float32_t)ADC_buffer[read_buffer_start + i];
+  	          }
 
-    }
+  	          arm_rfft_fast_f32(&varInstRfftF32, RFFT_Input, RFFT_Output, 0);
+
+  	          arm_cmplx_mag_f32(RFFT_Output, RFFT_Out_Mag, WINDOW_SIZE / 2);
+
+  	          float32_t maxValue = 0.0f;
+  	          uint32_t maxIndex = 0;
+  	          arm_max_f32(RFFT_Out_Mag, WINDOW_SIZE / 2, &maxValue, &maxIndex);
+
+  	          float32_t dominantFrequency = (float32_t)maxIndex * (10000.0f / WINDOW_SIZE);
+
+  	          int dominantFrequencyInt = (int)dominantFrequency;
+  	          sprintf(uart_message, "Dominant Frequency (Int): %d Hz\r\n", dominantFrequencyInt);
+  	          HAL_UART_Transmit(&huart2, (uint8_t *)uart_message, strlen(uart_message), 100);
+  	      }
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+    }
   /* USER CODE END 3 */
 }
 
@@ -258,6 +272,54 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 8400-1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
