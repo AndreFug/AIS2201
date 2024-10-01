@@ -57,6 +57,9 @@ UART_HandleTypeDef huart2;
 uint16_t ADC_buffer[ADC_BUFFER_SIZE]; // Buffer to fill with values from ADC.
 __IO uint8_t buffer_full = 0;       // Flag used by interrupt handlers to signal when buffer is ready.
 uint32_t read_buffer_start = 0;     // Index of first sample in RFFT window
+/* USER CODE BEGIN PV */
+float32_t dominant_frequencies[100]; // Buffer to store dominant frequencies
+uint8_t frequency_counter = 0;       // Counter to track number of stored frequencie
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -137,44 +140,52 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   char uart_message[50];
   while (1)
-    {
-  	  if (buffer_full == 1)
-  	      {
-  	          buffer_full = 0;
+  {
+    if (buffer_full == 1) {
+        buffer_full = 0; // Reset 'buffer_full' flag
 
+        // Copy values from ADC_Buffer to RFFT_Input
+        for (int i = 0; i < WINDOW_SIZE; i++) {
+            RFFT_Input[i] = (float32_t)ADC_buffer[read_buffer_start + i];
+        }
 
-  	          for (int i = 0; i < 10; i++)
-  	                    {
-  	                        sprintf(uart_message, "ADC Value %d: %lu\r\n", i, ADC_buffer[read_buffer_start + i]);
-  	                        HAL_UART_Transmit(&huart2, (uint8_t *)uart_message, strlen(uart_message), 100);
-  	                    }
+        /* Calculate the real-valued FFT */
+        arm_rfft_fast_f32(&varInstRfftF32,
+                          RFFT_Input,
+                          RFFT_Output,
+                          0);
 
-  	          for (int i = 0; i < WINDOW_SIZE; i++)
-  	          {
-  	              RFFT_Input[i] = (float32_t)ADC_buffer[read_buffer_start + i];
-  	          }
+        /* Extract magnitude information |X[m]| */
+        RFFT_Out_Mag[WINDOW_SIZE] = fabs(RFFT_Output[1]);
+        RFFT_Output[1] = 0.0;
+        arm_cmplx_mag_f32(RFFT_Output, RFFT_Out_Mag, WINDOW_SIZE / 2);
 
-  	          arm_rfft_fast_f32(&varInstRfftF32, RFFT_Input, RFFT_Output, 0);
+        /* Find the highest frequency component */
+        float32_t max_value = 0.0f;
+        int max_index = 0;
 
-  	          arm_cmplx_mag_f32(RFFT_Output, RFFT_Out_Mag, WINDOW_SIZE / 2);
+        for (int i = 1; i < WINDOW_SIZE / 2; i++) {
+            if (RFFT_Out_Mag[i] > max_value) {
+                max_value = RFFT_Out_Mag[i];
+                max_index = i;
+            }
+        }
 
-  	          float32_t maxValue = 0.0f;
-  	          uint32_t maxIndex = 0;
-  	          arm_max_f32(RFFT_Out_Mag, WINDOW_SIZE / 2, &maxValue, &maxIndex);
+        /* Calculate the corresponding frequency */
+        float32_t dominant_frequency = (max_index * 10000.0f) / WINDOW_SIZE;
 
-  	          float32_t dominantFrequency = (float32_t)maxIndex * (10000.0f / WINDOW_SIZE);
-
-  	          int dominantFrequencyInt = (int)dominantFrequency;
-  	          sprintf(uart_message, "Dominant Frequency (Int): %d Hz\r\n", dominantFrequencyInt);
-  	          HAL_UART_Transmit(&huart2, (uint8_t *)uart_message, strlen(uart_message), 100);
-  	      }
-
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
+        /* Print the dominant frequency over UART */
+        sprintf(uart_message, "Dominant Frequency: %.2f Hz\r\n", dominant_frequency);  // Format message
+        HAL_UART_Transmit(&huart2, (uint8_t*)uart_message, strlen(uart_message), HAL_MAX_DELAY);  // Send via UART
     }
-  /* USER CODE END 3 */
-}
+  }
+    /* USER CODE END WHILE */
+  }
+      /* USER CODE BEGIN 3 */
+	// Created  by André Fugledal for the class AIS2201 and uploaded to github:
+	//https://github.com/AndreFug/AIS2201/blob/main/Exercise_6/stmIDE_task_solution.cpp
+    /* USER CODE END 3 */
+
 
 /**
   * @brief System Clock Configuration
